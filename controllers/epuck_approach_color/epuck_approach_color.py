@@ -32,9 +32,21 @@ rightPositionSensor.enable(TIME_STEP)
 camera.enable(TIME_STEP)
 
 def decide_state(current_state, image_bytes):
-    numpy_1_dim_rgba_byte_array = numpy.frombuffer(image_bytes, dtype=numpy.uint8)
-    numpy_3_dim_rgba_byte_array = numpy.reshape(numpy_1_dim_rgba_byte_array, shape=(240, 320, 4), order='C')
-    # TODO: eerste check: converteer terug naar opgeslagen afbeelding, is ze identiek aan camerabeeld?
+    numpy_1_dim_bgra_byte_array = numpy.frombuffer(image_bytes, dtype=numpy.uint8)
+    numpy_3_dim_bgra_byte_array = numpy.reshape(numpy_1_dim_bgra_byte_array, shape=(240, 320, 4), order='C')
+    numpy_3_dim_rgba_byte_array = numpy_3_dim_bgra_byte_array[..., [2, 1, 0, 3]]
+    numpy_3_dim_rgb_float_array = numpy_3_dim_rgba_byte_array[..., :3] / 255.0
+    numpy_3_dim_hue_angle_array = matplotlib.colors.rgb_to_hsv(numpy_3_dim_rgb_float_array)[..., :1].squeeze() * 360.0
+    flattened_hues = numpy_3_dim_hue_angle_array.flatten()
+    # print(flattened_hues)
+    number_of_red = len([hue for hue in flattened_hues if hue <= 10 or hue >= 350])
+    red_ratio = number_of_red / len(flattened_hues)
+    if red_ratio >= 0.02:
+        print("Ik zie iets rood!")
+    else:
+        print("Ik zie niets!")
+    # TODO: zoek grootste rode cluster in gezichtsveld
+    # TODO: bepaal of die meer centraal moet    
     match current_state:
         case RobotState.ARRIVED:
             return RobotState.ARRIVED

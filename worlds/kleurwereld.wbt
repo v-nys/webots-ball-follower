@@ -5,6 +5,7 @@ EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/project
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/floors/protos/RectangleArena.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/robots/gctronic/e-puck/protos/E-puck.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/objects/balls/protos/Ball.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2023b/projects/appearances/protos/Parquetry.proto"
 
 WorldInfo {
 }
@@ -17,6 +18,10 @@ TexturedBackground {
 TexturedBackgroundLight {
 }
 RectangleArena {
+  floorAppearance Parquetry {
+    type "chequered"
+    colorOverride 0 1 1
+  }
 }
 E-puck {
   translation 0.08 -0.35 0
