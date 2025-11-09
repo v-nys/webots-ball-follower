@@ -1,11 +1,11 @@
-from controller import Robot, Motor
+from controller import Robot
 from enum import Enum
 from pathlib import Path
 import numpy as np
 import matplotlib
 import matplotlib.image
 import matplotlib.collections
-import matplotlib.pyplot
+import matplotlib.pyplot as plt
 import cv2
 
 # opgelet: veronderstelt een Python venv met numpy!
@@ -23,9 +23,22 @@ HUE_VAL = 0  # 0 is red
 # but opencv color conversion produces H value between 0 and 180...
 LOWER_COLOR = np.array([(HUE_VAL - 10) % 360, 100, 100])
 UPPER_COLOR = np.array([(HUE_VAL + 10) % 360, 255, 255])
+# zie https://cyberbotics.com/doc/reference/camera: 32 bits BGRA
 RED_BGRA_PIXEL = bytes.fromhex("0000ffff")
-GREEN_BGRA_PIXEL = bytes.fromhex("00ff00ff")
-IMG_WIDTH, IMG_HEIGHT = (320, 240)
+# GREEN_BGRA_PIXEL = bytes.fromhex("00ff00ff")
+# YELLOW_BGRA_PIXEL = bytes.fromhex("00f7ffff")
+# BLUE_BGRA_PIXEL = bytes.fromhex("ff0000ff")
+# MAGENTA_BGRA_PIXEL = bytes.fromhex("ff00ffff")
+NEARRED_BGRA_PIXEL = bytes.fromhex("1000ffff")
+IMG_WIDTH, IMG_HEIGHT = (4, 3)  # oorpsronkelijk 320x240
+
+# 0 hue is red
+# 30-ish is yellow
+# 60-ish is green
+# 120 is blue
+# 150 is magenta
+# so 180 will be red again
+# but this seems inconsistent with docs
 
 TIME_STEP = 64
 robot = Robot()
@@ -43,6 +56,12 @@ rightPositionSensor.enable(TIME_STEP)
 camera.enable(TIME_STEP)
 
 
+def check_rgba_values(arr):
+    plt.imshow(arr)
+    plt.axis("off")
+    plt.show()
+
+
 def decide_state(current_state, image_bytes):
     # reference material assumes https://picamera.readthedocs.io/en/release-1.13/api_array.html#pirgbarray
     # denk dat r, g en b worden voorgesteld als bytes, niet als floats
@@ -51,20 +70,17 @@ def decide_state(current_state, image_bytes):
         numpy_1_dim_bgra_byte_array, shape=(IMG_HEIGHT, IMG_WIDTH, 4), order="C"
     )
     numpy_3_dim_rgba_byte_array = numpy_3_dim_bgra_byte_array[..., [2, 1, 0, 3]]
+    # check_rgba_values(numpy_3_dim_rgba_byte_array)
 
     # zie https://docs.opencv.org/3.4/d8/d01/group__imgproc__color__conversions.html
-    # FIXME: probleem in volgende drie regels?
-    # kloppen HSV-waarden? klopt color_mask? contours is altijd leeg...
-    # heb hier wel BGR2HSV, niet RGB2HSV
-    # LET OP! BGR2HSV geeft H-waarde tussen 0 en 180, niet 0 en 360
-    # en BGR2HSV_FULL geeft H-waarde tussen 0 en 255
-    # iets met range tot 360 is er niet...
-    hsv = cv2.cvtColor(numpy_3_dim_rgba_byte_array[..., :3], cv2.COLOR_RGB2HSV_FULL)
-    # nu heb ik een driedimensionale array van afmetingen IMG_HEIGHT, IMG_WIDTH, 3
-    # en ik wil elke eerste waarde van die 3 omzetten van schaal tot 255 naar schaal tot 360
-    # dus alles op één "plane" wil ik * 360 / 255
-    # met andere woorden: hsv[alle_rijen, alle_kolommen, 0] = hsv[alle_rijen, alle_kommen, 0] * 360 / 255
-    # dimensionaliteit van de array (positie + waarde) en van de data (hsv-waarde) is 3, maar dat kan verschillen!
+    # met 32-bit image zouden H, S en V al in juiste range moeten zijn
+    hsv = cv2.cvtColor(numpy_3_dim_rgba_byte_array[..., :3], cv2.COLOR_RGB2HSV)
+    restored = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+    check_rgba_values(restored)
+
+    # dus print misschien heel hsv[...,[0]]?
+    # dat zou een 4x3 moeten zijn met 3/4 groene hue en 1/4 rode
+    print(hsv[..., [0]])
 
     color_mask = cv2.inRange(hsv, LOWER_COLOR, UPPER_COLOR)
     contours, _ = cv2.findContours(color_mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
@@ -101,7 +117,10 @@ def decide_state(current_state, image_bytes):
 
 while robot.step(TIME_STEP) != -1:
     real_bytes = camera.getImage()
-    fake_bytes = (GREEN_BGRA_PIXEL * (IMG_WIDTH * IMG_HEIGHT * 3 // 4)) + (
+    # 3/4 groen en 1/4 rood, kan alvast checken dat verhouding klopt
+    # formaat van camera.getImage zou BGRA (32 bits) moeten zijn
+    # zie https://cyberbotics.com/doc/reference/camera
+    fake_bytes = (NEARRED_BGRA_PIXEL * (IMG_WIDTH * IMG_HEIGHT * 3 // 4)) + (
         RED_BGRA_PIXEL * (IMG_WIDTH * IMG_HEIGHT // 4)
     )
     robot.state = decide_state(robot.state, fake_bytes)
