@@ -49,7 +49,7 @@ while robot.step(TIME_STEP) != -1:
             theta = math.atan2(vertical, horizontal)
             if theta < 0:
                 theta += math.pi * 2
-        if theta:
+        if theta is not None:
             # ik ben nog niet helemaal zeker hoe goed dit zal werken met een echte stappenmotor
             # kan die met fracties van stappen werken?
             adjustment_left = math.sin(theta + math.pi / 4)
