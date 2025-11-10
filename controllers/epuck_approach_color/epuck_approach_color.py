@@ -1,21 +1,18 @@
 from controller import Robot
 from enum import Enum
-from pathlib import Path
 import numpy as np
-import matplotlib
-import matplotlib.image
-import matplotlib.collections
-import matplotlib.pyplot as plt
 import cv2
+import sys
 
-# opgelet: veronderstelt een Python venv met numpy!
+# opgelet: veronderstelt dat NumPy en OpenCV bruikbaar zijn uit Python!
 
 
 class RobotState(Enum):
-    ORIENTING = 1  # weet bal liggen
-    APPROACHING = 2  # bal is ongeveer centraal
-    LOST_SIGHT = 3  # geen idee, dus spin
-    ARRIVED = 4  # niets meer te doen
+    ORIENTING_COUNTERCLOCKWISE = 1  # bal gezien, ligt links van centrum
+    ORIENTING_CLOCKWISE = 2  # bal gezien, ligt rechts van centrum
+    APPROACHING = 3  # bal is ongeveer centraal, rijden vooruit
+    LOST_SIGHT = 4  # geen idee, dus spin
+    ARRIVED = 5  # niets meer te doen
 
 
 # 0 hue is rood
@@ -33,15 +30,22 @@ assert HUE_OFFSET >= 0 and HUE_OFFSET < 180, "geen zinvolle offsethoek"
 # zullen gecontroleerde hues moeten aanpassen
 LOWER_COLOR = np.array([(HUE_VAL - HUE_OFFSET), 50, 50])
 UPPER_COLOR = np.array([(HUE_VAL + HUE_OFFSET), 255, 255])
-# zie https://cyberbotics.com/doc/reference/camera: 32 bits totaal
-# dus "8-bit" afbeelding (see https://www.tourboxtech.com/en/news/bit-depth-explained.html)
-RED_BGRA_PIXEL = bytes.fromhex("0000ffff")
-GREEN_BGRA_PIXEL = bytes.fromhex("00ff00ff")
-IMG_WIDTH, IMG_HEIGHT = (320, 240)  # (4, 3)  # oorpsronkelijk 320x240 genomen
+IMG_WIDTH, IMG_HEIGHT = (320, 240)  # moet matchen met setting camera in Webots!
+ALLOWED_DEVIATION_PERCENTAGE_ORIENTING = 10.0
+ALLOWED_ABSOLUTE_DEVIATION_ORIENTING = IMG_WIDTH * (
+    ALLOWED_DEVIATION_PERCENTAGE_ORIENTING / 100
+)
+ALLOWED_DEVIATION_PERCENTAGE_APPROACHING = ALLOWED_DEVIATION_PERCENTAGE_ORIENTING * 2
+ALLOWED_ABSOLUTE_DEVIATION_APPROACHING = IMG_WIDTH * (
+    ALLOWED_DEVIATION_PERCENTAGE_APPROACHING / 100
+)
+STOP_APPROACHING_AT_PERCENT = 30.0
+REQUIRED_SCREEN_COVERAGE_IN_PIXELS = (
+    IMG_WIDTH * IMG_HEIGHT * STOP_APPROACHING_AT_PERCENT / 100.0
+)
 TIME_STEP = 64
 robot = Robot()
-robot.state = RobotState.ORIENTING
-
+robot.state = RobotState.LOST_SIGHT
 camera = robot.getDevice("camera")
 leftMotor = robot.getDevice("left wheel motor")
 rightMotor = robot.getDevice("right wheel motor")
@@ -53,7 +57,7 @@ rightPositionSensor.enable(TIME_STEP)
 camera.enable(TIME_STEP)
 
 
-def decide_state(current_state, image_bytes):
+def get_ball_area_and_coordinates(image_bytes):
     # boek gebruikt https://picamera.readthedocs.io/en/release-1.13/api_array.html#pirgbarray
     # staat eigenlijk niet hoe veel bits per kleurkanaal er dan zijn, vermoedelijk 8
     numpy_1_dim_bgra_byte_array = np.frombuffer(image_bytes, dtype=np.uint8)
@@ -88,25 +92,40 @@ def decide_state(current_state, image_bytes):
             object_area = found_area
             object_x = center_x
             object_y = center_y
-    if object_area > 0:
-        ball_location = [object_area, object_x, object_y]
-        print(f"Ik zie hem op x-positie {ball_location[1]}!")
+    if object_area:
+        return (object_area, object_x, object_y)
     else:
-        ball_location = None
-        print("Ik zie hem niet!")
-    # TODO: bepaal wat er moet gebeuren
-    # indien we aan het oriënteren zijn, moet hij op IMG_WIDTH+-FOCUS_MARGIN komen
-    # indien we een het naderen zijn, mag hij wat off-center zijn, bv. IMG_WIDTH+-2FOCUS_MARGIN
-    # indien object_area heel groot is, zitten we er tegen...
+        return (None, None, None)
+
+
+def decide_state(current_state, image_bytes):
+    (ball_screen_area, ball_x, ball_y) = get_ball_area_and_coordinates(image_bytes)
+    if not ball_screen_area:
+        return RobotState.LOST_SIGHT
+    deviation = ball_x - IMG_WIDTH / 2
     match current_state:
         case RobotState.ARRIVED:
             return RobotState.ARRIVED
+        case (
+            RobotState.ORIENTING_CLOCKWISE
+            | RobotState.ORIENTING_COUNTERCLOCKWISE
+            | RobotState.LOST_SIGHT
+        ):
+            if abs(deviation) < ALLOWED_ABSOLUTE_DEVIATION_ORIENTING:
+                return RobotState.APPROACHING
+            elif deviation < 0:
+                return RobotState.ORIENTING_COUNTERCLOCKWISE
+            else:
+                return RobotState.ORIENTING_CLOCKWISE
         case RobotState.APPROACHING:
-            # TODO: wees milder, maar blijf monitoren
-            return RobotState.APPROACHING
-        case _:
-            # TODO: analyseer beeld, kan elke state opleveren
-            return RobotState.LOST_SIGHT
+            if abs(deviation) < ALLOWED_DEVIATION_PERCENTAGE_APPROACHING:
+                if ball_screen_area >= REQUIRED_SCREEN_COVERAGE_IN_PIXELS:
+                    return RobotState.ARRIVED
+                return RobotState.APPROACHING
+            elif deviation < 0:
+                return RobotState.ORIENTING_COUNTERCLOCKWISE
+            else:
+                return RobotState.ORIENTING_CLOCKWISE
 
 
 while robot.step(TIME_STEP) != -1:
@@ -114,12 +133,16 @@ while robot.step(TIME_STEP) != -1:
     real_bytes = camera.getImage()
     robot.state = decide_state(robot.state, real_bytes)
     match robot.state:
-        case RobotState.ORIENTING:
-            pass
+        case RobotState.ORIENTING_COUNTERCLOCKWISE:
+            rightMotor.setPosition(rightPositionSensor.getValue() + 1)
+        case RobotState.ORIENTING_CLOCKWISE:
+            leftMotor.setPosition(leftPositionSensor.getValue() + 1)
         case RobotState.APPROACHING:
             leftMotor.setPosition(leftPositionSensor.getValue() + 1)
             rightMotor.setPosition(rightPositionSensor.getValue() + 1)
         case RobotState.LOST_SIGHT:
+            # arbitraire keuze om dan tegen de klok in te draaien
             rightMotor.setPosition(rightPositionSensor.getValue() + 1)
         case RobotState.ARRIVED:
             print("Ik sta hier goed.")
+            sys.exit(0)
