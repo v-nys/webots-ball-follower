@@ -8,4 +8,4 @@ orthographicViewHeight: 1
 textFiles: -1
 globalOptionalRendering: CameraFrustums
 consoles: Console:All:All
-renderingDevicePerspectives: e-puck:camera;1;0.571875;0;0.0019455
+renderingDevicePerspectives: e-puck:camera;1;1.35;0;0.0019455
